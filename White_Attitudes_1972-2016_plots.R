@@ -25,21 +25,26 @@ allData <- fread(input = "J:/Personal/MWH/White_Attitudes_1972-2016_clean.csv",
 # font_import()
 # loadfonts(device="win")       #Register fonts for Windows bitmap output
 # fonts()
-yearsByCategory <- allData[, .(Year = seq(min(Year), max(Year))), by = .(Category)]
-questionsByCategory <- allData[, .(`Question Code` = unique(`Question Code`)), by = .(Category)]
+yearsByCategory <- allData[, .(Year = seq(min(Year), max(Year))),
+                           by = .(Category)]
+
+questionsByCategory <- allData[, .(`Question Code` = unique(`Question Code`),
+                                   `Mean Response Per Question` = unique(`Mean Response Per Question`)),
+                               by = .(Category)]
+
 supplement <- merge(yearsByCategory, questionsByCategory, by = "Category",
                     all = T, allow.cartesian = T)
 
-setkey(supplement)
+setkey(supplement, Category, Year, `Question Code`)
 setkey(allData, Category, Year, `Question Code`)
-allData <- allData[supplement]
+allData <- allData[, .SD, .SDcols = c("Category", "Year", "Question Code", "Percent Response")][supplement]
 
 questionColors <- data.table(Category = unique(allData$Category),
                              `Question Color` = sample(rainbow(5, .65, .75, alpha = .7)),
                              key = "Category")
 setkey(allData, Category)
 allData <- questionColors[allData]
-
+# stop()
 allPlots <- sapply(unique(allData$Category), function(x){
 
         thisCategory <- allData[Category==x]
@@ -47,24 +52,39 @@ allPlots <- sapply(unique(allData$Category), function(x){
         questionPlots <- sapply(unique(thisCategory$`Question Code`), function(y){
 
                 thisQuestion <- thisCategory[`Question Code`==y]
+                thisQuestion <- thisQuestion[is.na(`Percent Response`), `Percent Response` := 0]
 
-                plot <- ggplot(data = thisQuestion) +
-                        aes(x = factor(thisQuestion$Year), y = thisQuestion$`Percent Response`) +
-                        geom_bar(fill = thisQuestion$`Question Color`,
+                plot <- ggplot() +
+
+                        geom_bar(data = thisQuestion,
+                                 mapping = aes(x = Year, y = `Percent Response`),
+                                 fill = thisQuestion$`Question Color`,
                                  stat = "identity") +
+
+#                         geom_smooth(data = thisQuestion,
+#                                     mapping = aes(x = Year,
+#                                                   y = `Percent Response`),
+#                                     method = "lm") +
+                        geom_hline(aes(color = "grey10"),
+                                   yintercept = thisQuestion$`Mean Response Per Question`) +
+                        # geom_abline(aes(color = "grey10"), slope = lbf[2],intercept = lbf[1]) +
 
                         scale_y_continuous(name = "",
                                            breaks = seq(0, 1, .2),
                                            labels = percent(seq(0, 1, .2)),
                                            limits = c(0, 1)) +
-
-                        geom_hline(aes(color = "grey10"),
-                                   yintercept = thisQuestion$`Mean Response Per Question`) +
+                        scale_x_continuous(name = "",
+                                           breaks = seq(min(thisQuestion$Year),
+                                                        max(thisQuestion$Year)),
+                                           label = seq(min(thisQuestion$Year),
+                                                       max(thisQuestion$Year)),
+                                           limits = c(min(thisQuestion$Year),
+                                                      max(thisQuestion$Year))) +
 
                         theme(axis.text.x = element_text(angle = 270,
                                                          hjust = 1,
                                                          vjust = .5,
-                                                         margin = margin(-12,0,0,0)),
+                                                         margin = margin(-15,0,0,0)),
                               axis.ticks.x = element_line(linetype = 0),
                               axis.text.y = element_text(angle = 0, hjust = 1),
                               panel.background = element_rect(fill = NA),
@@ -73,7 +93,8 @@ allPlots <- sapply(unique(allData$Category), function(x){
                               legend.position = "none",
                               text = element_text(family = "Times New Roman")) +
 
-                        geom_text(aes(x = 4,
+                        geom_text(data = thisQuestion,
+                                  aes(x = min(thisQuestion$Year)+4,
                                       y = thisQuestion$`Mean Response Per Question`,
                                       label = paste0("mean = ",
                                                      percent(thisQuestion$`Mean Response Per Question`)),
@@ -85,13 +106,18 @@ allPlots <- sapply(unique(allData$Category), function(x){
 
 }, simplify = F, USE.NAMES = T)
 
+
 stop()
 
-for(j in unique(allData$Category)){
-        pdf(file = paste0("White_Attitudes_1972-2016_", j, "_plots.pdf"),
-            onefile = T, family = "Times New Roman", title = "White Attitudes 1972-2016", pointsize = 8)
-        for(i in unique(allData$`Question Code`)){
-                plot(allPlots[[i]])
-        }
-        dev.off()
-}
+sapply(names(allPlots), function(x){
+        sapply(unique(allData[Category==x]$`Question Code`), function(y){
+                pdf(file = paste0("White_Attitudes_1972-2016_", x, "-", y, "_plot.pdf"),
+                    family = "Times New Roman",
+                    title = "White Attitudes 1972-2016",
+                    pointsize = 8)
+                plot(allPlots[[x]][[y]])
+                dev.off()
+        })
+})
+
+
