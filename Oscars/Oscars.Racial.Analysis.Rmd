@@ -1,0 +1,159 @@
+---
+title: "Oscars Racial Analysis"
+author: "Menaka Kannan"
+date: "February 3, 2018"
+output: html_document
+---
+
+```{r setup, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(stringr)
+library(RColorBrewer)
+library(glue)
+
+```
+
+```{r load, cache=TRUE}
+
+oscars <- read_excel(path = "Oscars/Hughey.Oscars.Data.xlsx")
+
+```
+
+1 = Asian
+2 = Black
+3 = Latinx
+4 = Native American
+
+```{r tidy, cache=TRUE}
+
+# map(.x = oscars, .f = ~ sum(is.na(.))/length(.))
+
+oscars <- oscars %>%
+        mutate(POC = if_else(POC == 0, 
+                             true = NA_integer_, 
+                             false = as.integer(POC)),
+               
+               Win = as.logical(if_else(Winner == "Pending", 
+                                        true = F, 
+                                        false = T,
+                                        missing = F))) %>%
+        
+        select(-Winner) %>%
+        
+        filter(!is.na(`Year of Oscars`)) %>%
+        
+        mutate(Award = if_else(Award %in% c("Actor", "Actress"),
+                               true = paste0(Award, " in a Leading Role"),
+                               false = Award)) %>%
+        
+        separate(col = Award, into = c("Role", "Lead_Support"), 
+                 sep = " in a ") %>%
+        
+        mutate(Lead_Support = substr(x = Lead_Support, 
+                                     start = 1, 
+                                     stop = str_locate(Lead_Support,
+                                                       ".(?=i)"))) %>%
+        
+        rename(Year = `Year of Oscars`, Name = `Name of Nominee`)
+
+# map(.x = oscars, .f = ~ sum(is.na(.)))
+
+map(.x = oscars, .f = ~ unique(.)[1:min(10, n_distinct(., na.rm = F))])
+
+```
+
+
+```{r stacked-bar, cache=TRUE, echo=FALSE}
+
+oscars.plot1.data <- oscars %>%
+        unite(Role_Type, Lead_Support:Role, sep = " ") %>%
+        mutate(Year = as.character.Date(Year)) %>%
+        group_by(Role_Type, Year) %>%
+        arrange(POC, .by_group = T) %>%
+        mutate(POC = factor(POC, levels = c(3:0)))
+
+plot1 <- ggplot(filter(oscars.plot1.data)) + 
+        aes(x = Year, fill = POC) +
+        geom_bar() +
+        coord_flip() +
+        facet_wrap( ~ Role_Type) +
+        scale_fill_brewer(type = "qual", na.value = "grey90") +
+        theme(panel.background = element_rect(fill = "white"),
+              strip.background = element_rect(fill = "white")) +
+        scale_x_discrete(breaks = c(1929, seq(1929, 2018, by = 5), 2018))
+
+plots <- tibble(type = "stacked bar",
+                data = list(oscars.plot1.data),
+                plot = list(plot1))
+```
+
+```{r scatter}
+
+oscars.plot2.data <- oscars.plot1.data %>%
+        group_by(Role_Type, Year, POC) %>%
+        summarise(n = n()) %>%
+        mutate(poc_freq = n/sum(n), .by_group = T)
+
+plot2 <- ggplot(oscars.plot2.data) + 
+        aes(x = Year, y = n) +
+        geom_point(aes(color = POC)) +
+        scale_fill_brewer(type = "qual") +
+        facet_wrap( ~ Role_Type)
+
+```
+
+```{r heat-map}
+
+oscars.plot3.data <- oscars %>%
+        unite(Role_Type, Lead_Support:Role, sep = " ") %>%
+        mutate(Year = as.character.Date(Year),
+               POC = if_else(is.na(POC),
+                             true = as.integer(0),
+                             false = POC)) %>%
+        mutate(POC = factor(POC, 
+                            labels = c("White", "Asian", "Black", 
+                                       "Latinx", "Native American"),
+                            levels = c(0:4))) %>%
+        group_by(Role_Type, Year, POC) %>%
+        mutate(id = 1:n())
+
+colors <- c('#ffffb3','#8dd3c7','#bebada','#fb8072','#80b1d3')
+
+plot3 <- ggplot(oscars.plot3.data) + 
+        aes(x = id, y = Year) +
+        geom_point(aes(color = POC, alpha = Win, size = 5)) +
+        scale_alpha_discrete(range = c(.5, 1)) +
+        scale_color_manual(values = colors) +
+        theme(panel.background = element_rect(fill = "white"),
+              strip.background = element_rect(fill = "white"),
+              legend.position = "bottom") +
+        scale_y_discrete(breaks = c(1929, seq(1929, 2018, by = 5), 2018)) +
+        facet_grid(. ~ Role_Type)
+
+plot3
+
+# plots <- plots %>%
+#         bind_rows(tibble(type = "heat map",
+#                          data = list(oscars.plot3.data),
+#                          plot = list(plot3)))
+```
+
+```{r output-graphs, eval = FALSE}
+
+map(plots$type, function(x)
+{
+        png(file = glue("Oscars/Oscars.Racial.History_{type}.png",
+                        type = x))
+        filter(plots, type == x)$plot
+        dev.off()
+})
+
+```
+
